@@ -1,0 +1,22 @@
+# Plantilla compartida (igual para los 3 nodos). Se convierte en
+# /tmp/bootstrap.yml al arrancar el contenedor, sustituyendo NOFAILOVER
+# y NOSYNC por los valores reales de ESE nodo (via envsubst).
+bootstrap:
+  dcs:
+    ttl: 30
+    loop_wait: 10
+    retry_timeout: 10
+    maximum_lag_on_failover: 1048576
+    synchronous_mode: true
+    postgresql:
+      use_pg_rewind: true
+  initdb:
+    - encoding: UTF8
+    - data-checksums
+  pg_hba:
+    - host replication replicator 0.0.0.0/0 md5
+    - host all all 0.0.0.0/0 md5
+
+tags:
+  nofailover: ${NOFAILOVER}
+  nosync: ${NOSYNC}

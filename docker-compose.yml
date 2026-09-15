@@ -1,0 +1,62 @@
+# Punto de entrada DISTRIBUIDO: cada quien corre este mismo archivo con
+# SU PROPIO .env, apuntando a las IPs reales de Tailscale.
+#
+# Nodos 1-3 (base de datos):
+#   docker compose --profile nodo-bd up -d --build
+# Nodo 4 (monitoreo, cuando C tenga su parte lista):
+#   docker compose --profile monitoreo up -d --build
+
+services:
+  etcd:
+    build:
+      context: ./base
+      dockerfile: Dockerfile.etcd
+    profiles: ["nodo-bd"]
+    environment:
+      - ETCD_NAME=${NODE_NAME}
+      - ETCD_DATA_DIR=/etcd-data
+      - ETCD_INITIAL_ADVERTISE_PEER_URLS=http://${MY_TAILSCALE_IP}:2380
+      - ETCD_LISTEN_PEER_URLS=http://0.0.0.0:2380
+      - ETCD_LISTEN_CLIENT_URLS=http://0.0.0.0:2379
+      - ETCD_ADVERTISE_CLIENT_URLS=http://${MY_TAILSCALE_IP}:2379
+      - ETCD_INITIAL_CLUSTER=nodo1=http://${IP_NODO1}:2380,nodo2=http://${IP_NODO2}:2380,nodo3=http://${IP_NODO3}:2380
+      - ETCD_INITIAL_CLUSTER_STATE=new
+      - ETCD_INITIAL_CLUSTER_TOKEN=bd2-grupo5
+    network_mode: host
+    volumes:
+      - etcd_data:/etcd-data
+
+  patroni:
+    build:
+      context: ./base
+      dockerfile: Dockerfile
+    profiles: ["nodo-bd"]
+    depends_on: [etcd]
+    network_mode: host
+    environment:
+      - PATRONI_NAME=${NODE_NAME}
+      - PATRONI_SCOPE=bd2-grupo5
+      - PATRONI_RESTAPI_LISTEN=0.0.0.0:8008
+      - PATRONI_RESTAPI_CONNECT_ADDRESS=${MY_TAILSCALE_IP}:8008
+      - PATRONI_ETCD3_HOSTS=${IP_NODO1}:2379,${IP_NODO2}:2379,${IP_NODO3}:2379
+      - PATRONI_POSTGRESQL_LISTEN=0.0.0.0:5432
+      - PATRONI_POSTGRESQL_CONNECT_ADDRESS=${MY_TAILSCALE_IP}:5432
+      - PATRONI_POSTGRESQL_DATA_DIR=/data/postgres
+      - PATRONI_REPLICATION_USERNAME=replicator
+      - PATRONI_REPLICATION_PASSWORD=${REPLICATION_PASSWORD}
+      - PATRONI_SUPERUSER_USERNAME=postgres
+      - PATRONI_SUPERUSER_PASSWORD=${SUPERUSER_PASSWORD}
+      - NOFAILOVER=${NOFAILOVER}
+      - NOSYNC=${NOSYNC}
+    volumes:
+      - pgdata:/data/postgres
+
+  # --- Se activa con --profile monitoreo, cuando C tenga su parte lista ---
+  # prometheus:
+  #   build: { context: ./monitoreo, dockerfile: Dockerfile }
+  #   profiles: ["monitoreo"]
+  #   ...
+
+volumes:
+  etcd_data:
+  pgdata:

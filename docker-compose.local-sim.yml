@@ -1,0 +1,130 @@
+# SOLO PARA PRUEBA LOCAL, EN TU SOLA MAQUINA.
+# Simula los 3 nodos usando nombres de contenedor en vez de IPs de Tailscale,
+# para validar que tu Dockerfile + variables de Patroni realmente forman un
+# cluster con quorum, antes de repartirlo en 3 hosts reales.
+#
+# Uso: docker compose -f docker-compose.local-sim.yml up -d --build
+
+services:
+  etcd-nodo1:
+    build:
+      context: ./base
+      dockerfile: Dockerfile.etcd
+    environment:
+      - ETCD_NAME=nodo1
+      - ETCD_DATA_DIR=/etcd-data
+      - ETCD_INITIAL_ADVERTISE_PEER_URLS=http://etcd-nodo1:2380
+      - ETCD_LISTEN_PEER_URLS=http://0.0.0.0:2380
+      - ETCD_LISTEN_CLIENT_URLS=http://0.0.0.0:2379
+      - ETCD_ADVERTISE_CLIENT_URLS=http://etcd-nodo1:2379
+      - ETCD_INITIAL_CLUSTER=nodo1=http://etcd-nodo1:2380,nodo2=http://etcd-nodo2:2380,nodo3=http://etcd-nodo3:2380
+      - ETCD_INITIAL_CLUSTER_STATE=new
+      - ETCD_INITIAL_CLUSTER_TOKEN=bd2-grupo5-sim
+
+  etcd-nodo2:
+    build:
+      context: ./base
+      dockerfile: Dockerfile.etcd
+    environment:
+      - ETCD_NAME=nodo2
+      - ETCD_DATA_DIR=/etcd-data
+      - ETCD_INITIAL_ADVERTISE_PEER_URLS=http://etcd-nodo2:2380
+      - ETCD_LISTEN_PEER_URLS=http://0.0.0.0:2380
+      - ETCD_LISTEN_CLIENT_URLS=http://0.0.0.0:2379
+      - ETCD_ADVERTISE_CLIENT_URLS=http://etcd-nodo2:2379
+      - ETCD_INITIAL_CLUSTER=nodo1=http://etcd-nodo1:2380,nodo2=http://etcd-nodo2:2380,nodo3=http://etcd-nodo3:2380
+      - ETCD_INITIAL_CLUSTER_STATE=new
+      - ETCD_INITIAL_CLUSTER_TOKEN=bd2-grupo5-sim
+
+  etcd-nodo3:
+    build:
+      context: ./base
+      dockerfile: Dockerfile.etcd
+    environment:
+      - ETCD_NAME=nodo3
+      - ETCD_DATA_DIR=/etcd-data
+      - ETCD_INITIAL_ADVERTISE_PEER_URLS=http://etcd-nodo3:2380
+      - ETCD_LISTEN_PEER_URLS=http://0.0.0.0:2380
+      - ETCD_LISTEN_CLIENT_URLS=http://0.0.0.0:2379
+      - ETCD_ADVERTISE_CLIENT_URLS=http://etcd-nodo3:2379
+      - ETCD_INITIAL_CLUSTER=nodo1=http://etcd-nodo1:2380,nodo2=http://etcd-nodo2:2380,nodo3=http://etcd-nodo3:2380
+      - ETCD_INITIAL_CLUSTER_STATE=new
+      - ETCD_INITIAL_CLUSTER_TOKEN=bd2-grupo5-sim
+
+  patroni-nodo1:
+    build:
+      context: ./base
+      dockerfile: Dockerfile
+    depends_on: [etcd-nodo1, etcd-nodo2, etcd-nodo3]
+    healthcheck:
+      # Solo se considera "healthy" cuando /leader responde 200,
+      # es decir, cuando ESTE nodo ya es el lider del cluster.
+      test: ["CMD", "curl", "-f", "http://localhost:8008/leader"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    environment:
+      - PATRONI_NAME=nodo1
+      - PATRONI_SCOPE=bd2-grupo5-sim
+      - PATRONI_RESTAPI_LISTEN=0.0.0.0:8008
+      - PATRONI_RESTAPI_CONNECT_ADDRESS=patroni-nodo1:8008
+      - PATRONI_ETCD3_HOSTS=etcd-nodo1:2379,etcd-nodo2:2379,etcd-nodo3:2379
+      - PATRONI_POSTGRESQL_LISTEN=0.0.0.0:5432
+      - PATRONI_POSTGRESQL_CONNECT_ADDRESS=patroni-nodo1:5432
+      - PATRONI_POSTGRESQL_DATA_DIR=/data/postgres
+      - PATRONI_REPLICATION_USERNAME=replicator
+      - PATRONI_REPLICATION_PASSWORD=replicador123
+      - PATRONI_SUPERUSER_USERNAME=postgres
+      - PATRONI_SUPERUSER_PASSWORD=postgres123
+      - NOFAILOVER=false
+      - NOSYNC=false
+
+  patroni-nodo2:
+    build:
+      context: ./base
+      dockerfile: Dockerfile
+    depends_on:
+      etcd-nodo1: {condition: service_started}
+      etcd-nodo2: {condition: service_started}
+      etcd-nodo3: {condition: service_started}
+      patroni-nodo1: {condition: service_healthy}
+    environment:
+      - PATRONI_NAME=nodo2
+      - PATRONI_SCOPE=bd2-grupo5-sim
+      - PATRONI_RESTAPI_LISTEN=0.0.0.0:8008
+      - PATRONI_RESTAPI_CONNECT_ADDRESS=patroni-nodo2:8008
+      - PATRONI_ETCD3_HOSTS=etcd-nodo1:2379,etcd-nodo2:2379,etcd-nodo3:2379
+      - PATRONI_POSTGRESQL_LISTEN=0.0.0.0:5432
+      - PATRONI_POSTGRESQL_CONNECT_ADDRESS=patroni-nodo2:5432
+      - PATRONI_POSTGRESQL_DATA_DIR=/data/postgres
+      - PATRONI_REPLICATION_USERNAME=replicator
+      - PATRONI_REPLICATION_PASSWORD=replicador123
+      - PATRONI_SUPERUSER_USERNAME=postgres
+      - PATRONI_SUPERUSER_PASSWORD=postgres123
+      - NOFAILOVER=false
+      - NOSYNC=false
+
+  patroni-nodo3:
+    build:
+      context: ./base
+      dockerfile: Dockerfile
+    depends_on:
+      etcd-nodo1: {condition: service_started}
+      etcd-nodo2: {condition: service_started}
+      etcd-nodo3: {condition: service_started}
+      patroni-nodo1: {condition: service_healthy}
+    environment:
+      - PATRONI_NAME=nodo3
+      - PATRONI_SCOPE=bd2-grupo5-sim
+      - PATRONI_RESTAPI_LISTEN=0.0.0.0:8008
+      - PATRONI_RESTAPI_CONNECT_ADDRESS=patroni-nodo3:8008
+      - PATRONI_ETCD3_HOSTS=etcd-nodo1:2379,etcd-nodo2:2379,etcd-nodo3:2379
+      - PATRONI_POSTGRESQL_LISTEN=0.0.0.0:5432
+      - PATRONI_POSTGRESQL_CONNECT_ADDRESS=patroni-nodo3:5432
+      - PATRONI_POSTGRESQL_DATA_DIR=/data/postgres
+      - PATRONI_REPLICATION_USERNAME=replicator
+      - PATRONI_REPLICATION_PASSWORD=replicador123
+      - PATRONI_SUPERUSER_USERNAME=postgres
+      - PATRONI_SUPERUSER_PASSWORD=postgres123
+      - NOFAILOVER=true
+      - NOSYNC=true
