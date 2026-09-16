@@ -105,3 +105,36 @@ El monitoreo (parte de la capa de C) casi no requiere reunión: mientras A y B d
 - ¿Cuáles 3-4 extras de la sección 3 se comprometen a implementar?
 - ¿Calendario: cuántas semanas hay hasta la entrega? Ubicar las 4 sesiones de integración en fechas tentativas.
 - ¿Todos tienen Docker instalado y pueden confirmar que corren Linux nativo/WSL2 (para decidir `network_mode: host` vs. bridge)?
+
+---
+
+## 7. Estado de implementación — Capa A (Nodo 1) completada
+
+> Sección viva: se actualiza a medida que cada capa se integra. Lo marcado como "validado" se probó en una sesión en vivo con los **3 nodos** conectados por Tailscale.
+
+### Lo que ya está implementado y validado (Persona A — Nodo 1)
+
+| Componente | Qué quedó hecho | Estado |
+|---|---|---|
+| Entorno base | Docker + Tailscale + plantillas parametrizadas (`docker-compose.yml`, `.env.example`, carpeta `base/` con `Dockerfile`, `bootstrap.yml.template`, `entrypoint.sh`) | Validado |
+| Replicación | PostgreSQL 16 + Patroni 4.1.5 + etcd 3.5.17, clúster `bd2-grupo5`: nodo1 `Leader`, nodo2 `Sync Standby`, nodo3 `Replica` (async, lag 0) | Validado en vivo |
+| Sincronía/roles | `synchronous_mode: true`; nodo2 candidato síncrono (priority 1), nodo3 con tags `nofailover: true` + `nosync: true` (excluido de sincrónico y de ser promovido) | Validado |
+| Failover | Promoción planificada (`patronictl failover`), failover automático por caída del líder (TTL 30 s) y reintegración con `pg_rewind` | Validado |
+| Bootstrap distribuido | Secuencia por fases (etcd primero + checkpoint de `cluster version`) y arranque rápido con un solo comando (`dc3 up -d`) | Validado (ver `base/README.md`) |
+| Prueba en 2 nodos | Override `docker-compose.2nodes.yml` para validar sin el tercer nodo (etcd 2/2) | Validado |
+
+**Problema detectado y resuelto en esta capa:** Patroni elige el prefijo de API según la `cluster version` que reporta etcd. Si un miembro del `ETCD_INITIAL_CLUSTER` nunca se une, la versión del clúster queda en `3.0.0` y Patroni usa `/v3alpha` (eliminado en etcd 3.5) → queda atascado en `waiting on etcd`. Solución documentada en `base/README.md`: checkpoint obligatorio de `/version` (debe decir `3.5.x`) antes de levantar Patroni, más arranque por fases para el primer bootstrap y `dc3 up -d` para los reinicios.
+
+**Dónde está todo:** comandos exactos en `/home/julian/BD2/proyecto1/base/README.md` (Paso 1 local, Paso 2 bootstrap distribuido por fases, arranque rápido, pruebas de replicación y failover).
+
+### Próximos pasos — Persona B (Nodo 2): proxy + failover con VIP
+
+1. **HAProxy** en los 3 nodos de BD, con dos pools:
+   - `postgres_primario` → health check `http://<nodo>:8008/primary` (escrituras).
+   - `postgres_lectura` → health check `http://<nodo>:8008/replica` (lecturas).
+2. **keepalived (VRRP)** para la VIP, con prioridad `Nodo1 > Nodo2 > Nodo3`, de modo que el acceso de los clientes apunte SIEMPRE a la VIP y no a un nodo directo.
+3. **Pruebas de failover con la VIP (Fases 3-5 del enunciado):** tumbar un nodo a mitad de la prueba y demostrar que la VIP sigue respondiendo (gracias a Patroni + HAProxy corriendo en cada nodo).
+4. **Coordinar con la Capa C** (Nodo 4) la prueba de carga (Fase 6), que debe apuntar a la VIP.
+5. Documentar su capa en el README del repo, con el mismo formato (qué se configuró y cómo probarlo).
+
+**Dependencia de la Capa A:** ya cubierta — la Capa B arranca sobre el clúster de replicación funcionando (nodo1 Leader, nodo2 Sync, nodo3 Replica no promocionable).

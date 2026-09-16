@@ -9,7 +9,7 @@ Contiene la imagen y configuración compartida del clúster de datos. Los `docke
 - `bootstrap.yml.template` — configuración compartida (igual para los 3 nodos): reglas de `initdb`, `pg_hba`, config dinámica inicial (`synchronous_mode: true`), y los tags `nofailover`/`nosync` como placeholders (`${NOFAILOVER}`, `${NOSYNC}`).
 - `entrypoint.sh` — al arrancar el contenedor, sustituye esos placeholders por los valores reales de ESE nodo (variables `NOFAILOVER`/`NOSYNC`, sin prefijo `PATRONI_`) y genera `/tmp/bootstrap.yml`, que es el que Patroni realmente usa. Esto es necesario porque Patroni **no** soporta configurar `tags` vía variables `PATRONI_TAGS_*` sueltas (confirmado revisando su código fuente) — solo funciona si está directo en el archivo YAML.
 
-## Paso 1 — Validar localmente (en tu propia laptop)
+## Paso 1 — Validar localmente (simulación local)
 
 Desde la **raíz** del repo:
 
@@ -101,6 +101,28 @@ La carrera por el primer líder existe: en modo distribuido, si los 3 levantan P
    ```
    Confirma: Nodo 1 `Leader`, Nodo 2 `Sync Standby`, Nodo 3 `Replica` (nunca `Leader`).
 
+## Arranque rápido — levantar todo con un solo comando
+
+Una vez que el clúster etcd **ya nació** (data en los volumes, versión `3.5.x`), no hace falta la secuencia por fases. Para levantar/reiniciar todo de una:
+
+```bash
+alias dc3='docker compose --profile nodo-bd'
+dc3 up -d              # levanta etcd + patroni en un solo comando
+dc3 ps                 # ambos Up, etcd Healthy, patroni running
+```
+
+El orden local está garantizado por `depends_on: etcd: condition: service_healthy` del compose: **Patroni no arranca hasta que el etcd local está sano**.
+
+⚠️ **Salvedad para el PRIMER arranque (post `down -v` en los 3):** el healthcheck solo garantiza que el etcd *local* está sano, no que los 3 miembros ya se unieron ni que etcd subió su `cluster version`. Como Patroni decide el prefijo de API **una sola vez al arrancar**, si Patroni inicia cuando etcd aún reporta `3.0.0` (algún miembro sin unirse), se queda "pensando" en `waiting on etcd` (log `Detected Etcd version 3.0.0...`).
+
+En la sesión real esto pasó en **Nodo 1**: se resolvió con `Ctrl+C` y volviendo a ejecutar el mismo `dc3 up -d`. Si no alcanza con eso:
+
+```bash
+dc3 restart patroni    # re-arranca solo Patroni; ahora etcd completo ya está en 3.5.x
+```
+
+Recomendación: el primer arranque de un clúster recién limpiado hacelo por fases (Paso 2: etcd primero + checkpoint). A partir de ahí, `dc3 up -d` queda como el comando normal.
+
 ## Probar solo con 2 nodos (sin nodo3)
 
 Si nodo3 físico no está disponible, usa el override `docker-compose.2nodes.yml` (en la **raíz** del repo). Arma el etcd como clúster de **2 miembros** (quorum 2/2 completo) para que la versión suba y Patroni funcione con el prefijo `/v3`:
@@ -111,6 +133,73 @@ docker compose --profile nodo-bd \
 ```
 
 ⚠️ Los 2 nodos deben usar el **mismo** override (mismos valores en su `.env`). Y ojo: con 2 miembros el quorum es 2/2 — si uno cae, etcd pierde quorum. Es para validar replicación/failover, no para demostrar alta disponibilidad real.
+
+## Pruebas de replicación y failover (clúster real)
+
+Comandos con los que se validó la implementación con los 3 nodos conectados por Tailscale. En todos, `dc3` es el alias `docker compose --profile nodo-bd`.
+
+### Replicación — los datos del líder llegan a las réplicas
+
+Escribir en el líder (Nodo 1):
+
+```bash
+export PGPASSWORD=$(grep SUPERUSER_PASSWORD .env | cut -d= -f2)
+dc3 exec patroni psql -U postgres -h localhost -c "CREATE TABLE t1(id int); INSERT INTO t1 VALUES (1),(2);"
+```
+
+Leer desde cada réplica (el dato debe estar en las 3):
+
+```bash
+dc3 exec patroni psql -U postgres -h localhost -c "SELECT * FROM t1 ORDER BY id;"
+```
+
+Escribir en una réplica debe fallar (Postgres es read-only ahí):
+
+```bash
+dc3 exec patroni psql -U postgres -h localhost -c "INSERT INTO t1 VALUES (3);"
+# ERROR: cannot execute INSERT in a read-only transaction
+```
+
+Confirmar el estado de sincronización (desde el líder):
+
+```bash
+curl -s localhost:8008/patroni | grep -E '"role"|sync_state'
+```
+
+Esperado: nodo2 `sync_state: sync` (priority 1, candidato síncrono) y nodo3 `sync_state: async` (descartado por el tag `nosync`).
+
+### Failover planificado — promover Nodo 2
+
+```bash
+dc3 exec patroni patronictl failover --candidate nodo2 --force
+dc3 exec patroni patronictl list
+```
+
+Nodo2 pasa a `Leader` (el timeline sube a `TL 2`) y nodo1/nodo3 quedan como `Replica`.
+
+### Failover por caída — matar al líder actual
+
+En el nodo que sea `Leader`:
+
+```bash
+dc3 stop patroni
+```
+
+Esperar ~30 s (TTL del lease en etcd) y consultar desde cualquier nodo:
+
+```bash
+dc3 exec patroni patronictl list
+```
+
+- Por quorum 2/3, otro nodo toma el liderazgo automáticamente.
+- Verificar que nodo3 **nunca** queda `Leader` (tag `nofailover: true`).
+
+### Reintegración del nodo caído
+
+```bash
+dc3 up -d patroni                  # en el nodo que se detuvo
+dc3 exec patroni patronictl list   # vuelve como Replica (usa pg_rewind)
+```
 
 ## Troubleshooting
 
