@@ -22,16 +22,26 @@ services:
       - ETCD_INITIAL_CLUSTER=nodo1=http://${IP_NODO1}:2380,nodo2=http://${IP_NODO2}:2380,nodo3=http://${IP_NODO3}:2380
       - ETCD_INITIAL_CLUSTER_STATE=new
       - ETCD_INITIAL_CLUSTER_TOKEN=bd2-grupo5
+    restart: unless-stopped
     network_mode: host
     volumes:
       - etcd_data:/etcd-data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:2379/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
 
   patroni:
     build:
       context: ./base
       dockerfile: Dockerfile
     profiles: ["nodo-bd"]
-    depends_on: [etcd]
+    depends_on:
+      etcd:
+        condition: service_healthy
+    restart: unless-stopped
     network_mode: host
     environment:
       - PATRONI_NAME=${NODE_NAME}

@@ -1,0 +1,28 @@
+# docker-compose.2nodes.yml — OVERRIDE SOLO para probar el clúster SIN nodo3.
+#
+# El docker-compose.yml principal arma el etcd con los 3 miembros del initial
+# cluster. Si nodo3 no existe todavía (está registrado en el roster pero nunca se
+# une), etcd queda esperando esa negociación y NO sube su cluster version de
+# 3.0.0 a 3.5.x. Patroni interpreta "3.0.0" y usa el prefijo /v3alpha, que etcd
+# 3.5 ya no sirve -> error "Detected Etcd version 3.0.0 ... AttributeError".
+#
+# Este override arma un etcd de 2 miembros (2/2 = quorum completo), la versión
+# sube, y Patroni funciona con /v3. NO toca el docker-compose.yml de 3 nodos.
+#
+# Uso (en los 2 nodos físicos, MISMO comando ambos, con su propio .env):
+#   docker compose --profile nodo-bd \
+#     -f docker-compose.yml -f docker-compose.2nodes.yml up -d etcd
+# luego, tras el checkpoint de /version, levantar patroni igual con ambos -f.
+#
+# ⚠️ Quorum 2/2: si uno de los 2 etcd cae, etcd pierde quorum (a diferencia del
+# clúster 3/2 de la reunión general). Útil para validar replicación/failover,
+# no para demostrar alta disponibilidad real.
+
+services:
+  etcd:
+    environment:
+      - ETCD_INITIAL_CLUSTER=nodo1=http://${IP_NODO1}:2380,nodo2=http://${IP_NODO2}:2380
+
+  patroni:
+    environment:
+      - PATRONI_ETCD3_HOSTS=${IP_NODO1}:2379,${IP_NODO2}:2379
