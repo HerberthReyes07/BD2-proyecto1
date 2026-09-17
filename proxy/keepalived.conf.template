@@ -1,0 +1,37 @@
+global_defs {
+    router_id ${NODE_NAME}
+    enable_script_security
+    script_user root
+}
+
+# Verificación periódica del estado de HAProxy
+vrrp_script chk_haproxy {
+    script "/usr/local/bin/check_haproxy.sh"
+    interval 2
+    weight 2
+    fall 2
+    rise 2
+}
+
+# Instancia VRRP en modo UNICAST para operar sobre la VPN Tailscale
+vrrp_instance VI_1 {
+    state ${KEEPALIVED_STATE}
+    interface ${KEEPALIVED_INTERFACE}
+    virtual_router_id 51
+    priority ${KEEPALIVED_PRIORITY}
+    advert_int 1
+
+    unicast_src_ip ${MY_TAILSCALE_IP}
+    unicast_peer {
+        ${PEER_IP_1}
+        ${PEER_IP_2}
+    }
+
+    virtual_ipaddress {
+        ${VIRTUAL_IP}/32 dev ${KEEPALIVED_INTERFACE}
+    }
+
+    track_script {
+        chk_haproxy
+    }
+}

@@ -1,0 +1,22 @@
+# docker-compose.local-sim.proxy.yml
+# Override para la simulación local: agrega HAProxy escuchando en 5000 (write), 5001 (read), 7000 (stats)
+# apuntando a los contenedores simulados de Patroni (patroni-nodo1, patroni-nodo2, patroni-nodo3).
+
+services:
+  haproxy:
+    build:
+      context: ./proxy
+      dockerfile: Dockerfile
+    depends_on:
+      patroni-nodo1:
+        condition: service_healthy
+    ports:
+      - "5000:5000"
+      - "5001:5001"
+      - "7000:7000"
+    environment:
+      - NODE_NAME=local-proxy
+      - MY_TAILSCALE_IP=localhost
+      - IP_NODO1=patroni-nodo1
+      - IP_NODO2=patroni-nodo2
+      - IP_NODO3=patroni-nodo3

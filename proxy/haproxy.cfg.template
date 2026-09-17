@@ -1,0 +1,65 @@
+global
+    log stdout format raw local0 info
+    maxconn 2048
+
+defaults
+    log global
+    mode tcp
+    option tcplog
+    option dontlognull
+    retries 3
+    timeout queue 5s
+    timeout connect 5s
+    timeout client 30m
+    timeout server 30m
+    timeout check 2s
+
+# -------------------------------------------------------------
+# Panel de Estadísticas Web (Monitoreo visual en tiempo real)
+# Acceso vía navegador: http://<IP>:7000/
+# -------------------------------------------------------------
+listen stats
+    mode http
+    bind *:7000
+    stats enable
+    stats uri /
+    stats refresh 3s
+    stats show-node
+    stats show-legends
+
+# -------------------------------------------------------------
+# Puerto 5000: Tráfico de ESCRITURA (Primary / Master)
+# Consulta a Patroni REST API: GET /primary
+# Solo el nodo Líder responde HTTP 200 OK.
+# -------------------------------------------------------------
+frontend postgres_write_front
+    bind *:5000
+    default_backend postgres_write_back
+
+backend postgres_write_back
+    mode tcp
+    option httpchk GET /primary
+    http-check expect status 200
+    default-server inter 3s fall 3 rise 2 on-marked-down shutdown-sessions
+    server nodo1 ${IP_NODO1}:5432 maxconn 100 check port 8008
+    server nodo2 ${IP_NODO2}:5432 maxconn 100 check port 8008
+    server nodo3 ${IP_NODO3}:5432 maxconn 100 check port 8008
+
+# -------------------------------------------------------------
+# Puerto 5001: Tráfico de LECTURA (Replicas)
+# Consulta a Patroni REST API: GET /replica
+# Balanceo roundrobin entre todas las réplicas disponibles.
+# -------------------------------------------------------------
+frontend postgres_read_front
+    bind *:5001
+    default_backend postgres_read_back
+
+backend postgres_read_back
+    mode tcp
+    balance roundrobin
+    option httpchk GET /replica
+    http-check expect status 200
+    default-server inter 3s fall 3 rise 2
+    server nodo1 ${IP_NODO1}:5432 maxconn 100 check port 8008
+    server nodo2 ${IP_NODO2}:5432 maxconn 100 check port 8008
+    server nodo3 ${IP_NODO3}:5432 maxconn 100 check port 8008

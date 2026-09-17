@@ -1,8 +1,10 @@
 # Punto de entrada DISTRIBUIDO: cada quien corre este mismo archivo con
 # SU PROPIO .env, apuntando a las IPs reales de Tailscale.
 #
-# Nodos 1-3 (base de datos):
+# Nodos 1-3 (base de datos y proxy):
 #   docker compose --profile nodo-bd up -d --build
+# Solo Proxy (para levantar o reiniciar el proxy por separado):
+#   docker compose --profile proxy up -d --build
 # Nodo 4 (monitoreo, cuando C tenga su parte lista):
 #   docker compose --profile monitoreo up -d --build
 
@@ -60,6 +62,43 @@ services:
       - NOSYNC=${NOSYNC}
     volumes:
       - pgdata:/data/postgres
+
+  # --- Capa de Proxy y Alta Disponibilidad (HAProxy + keepalived) ---
+  haproxy:
+    build:
+      context: ./proxy
+      dockerfile: Dockerfile
+    profiles: ["nodo-bd", "proxy"]
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      - NODE_NAME=${NODE_NAME}
+      - MY_TAILSCALE_IP=${MY_TAILSCALE_IP}
+      - IP_NODO1=${IP_NODO1}
+      - IP_NODO2=${IP_NODO2}
+      - IP_NODO3=${IP_NODO3}
+
+  keepalived:
+    build:
+      context: ./proxy
+      dockerfile: Dockerfile.keepalived
+    profiles: ["nodo-bd", "proxy"]
+    restart: unless-stopped
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+      - NET_BROADCAST
+      - NET_RAW
+    environment:
+      - NODE_NAME=${NODE_NAME}
+      - MY_TAILSCALE_IP=${MY_TAILSCALE_IP}
+      - IP_NODO1=${IP_NODO1}
+      - IP_NODO2=${IP_NODO2}
+      - IP_NODO3=${IP_NODO3}
+      - KEEPALIVED_PRIORITY=${KEEPALIVED_PRIORITY:-}
+      - KEEPALIVED_STATE=${KEEPALIVED_STATE:-}
+      - KEEPALIVED_INTERFACE=${KEEPALIVED_INTERFACE:-tailscale0}
+      - VIRTUAL_IP=${VIRTUAL_IP:-100.124.30.200}
 
   # --- Se activa con --profile monitoreo, cuando C tenga su parte lista ---
   # prometheus:

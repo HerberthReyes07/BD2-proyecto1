@@ -127,14 +127,23 @@ El monitoreo (parte de la capa de C) casi no requiere reunión: mientras A y B d
 
 **Dónde está todo:** comandos exactos en `/home/julian/BD2/proyecto1/base/README.md` (Paso 1 local, Paso 2 bootstrap distribuido por fases, arranque rápido, pruebas de replicación y failover).
 
-### Próximos pasos — Persona B (Nodo 2): proxy + failover con VIP
+### Lo que ya está implementado y validado (Persona B — Nodo 2)
 
-1. **HAProxy** en los 3 nodos de BD, con dos pools:
-   - `postgres_primario` → health check `http://<nodo>:8008/primary` (escrituras).
-   - `postgres_lectura` → health check `http://<nodo>:8008/replica` (lecturas).
-2. **keepalived (VRRP)** para la VIP, con prioridad `Nodo1 > Nodo2 > Nodo3`, de modo que el acceso de los clientes apunte SIEMPRE a la VIP y no a un nodo directo.
-3. **Pruebas de failover con la VIP (Fases 3-5 del enunciado):** tumbar un nodo a mitad de la prueba y demostrar que la VIP sigue respondiendo (gracias a Patroni + HAProxy corriendo en cada nodo).
-4. **Coordinar con la Capa C** (Nodo 4) la prueba de carga (Fase 6), que debe apuntar a la VIP.
-5. Documentar su capa en el README del repo, con el mismo formato (qué se configuró y cómo probarlo).
+| Componente | Qué quedó hecho | Estado |
+|---|---|---|
+| HAProxy inteligente | Frontend escritura (puerto 5000, `httpchk GET /primary`) y frontend lectura (puerto 5001, `httpchk GET /replica` con balanceo Round-Robin). Dashboard web en puerto 7000 | Implementado y validado localmente |
+| Conmutación automática | Redirección automática de escrituras tras failover de líder y balanceo de lecturas entre réplicas disponibles | Validado localmente |
+| keepalived (VRRP Unicast) | Configuración de VIP en modo Unicast para compatibilidad con Tailscale. Prioridades: Nodo 1 (150) > Nodo 2 (100) > Nodo 3 (50) con monitoreo continuo de HAProxy | Implementado |
+| Integración Compose | Servicios `haproxy` y `keepalived` integrados a `docker-compose.yml` con perfil `proxy` y `nodo-bd` | Implementado |
+| Documentación y bitácora | `proxy/README.md` con instrucciones de despliegue, guía de pruebas de Fases 3, 4 y 5, y plantilla de bitácora | Listo para sesión en vivo |
 
-**Dependencia de la Capa A:** ya cubierta — la Capa B arranca sobre el clúster de replicación funcionando (nodo1 Leader, nodo2 Sync, nodo3 Replica no promocionable).
+### Próximos pasos — Sesión de Integración en Vivo (Capa B)
+
+1. Reunión en vivo del equipo conectados por Tailscale (`debian`, `ronyr304`, `desktop-oe8o5p1`).
+2. Cada integrante levanta el proxy con `docker compose --profile nodo-bd up -d --build`.
+3. Ejecutar las pruebas de las Fases 3, 4 y 5 del enunciado registrando capturas y tiempos (RTO/RPO) para la bitácora:
+   - Caída de Nodo 1 y verificación de failover a Nodo 2 vía proxy.
+   - Caída de Nodo 2.
+   - Fallo múltiple de N1 y N2, verificando modo contingencia (solo lectura) en Nodo 3.
+4. Dar paso a la **Capa C** (Monitoreo con Prometheus/Grafana y pruebas de carga con k6).
+

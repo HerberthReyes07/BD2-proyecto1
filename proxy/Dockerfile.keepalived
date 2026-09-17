@@ -1,0 +1,11 @@
+FROM alpine:3.20
+
+RUN apk add --no-cache keepalived curl bash gettext iproute2 grep
+
+COPY keepalived.conf.template /keepalived.conf.template
+COPY check_haproxy.sh /usr/local/bin/check_haproxy.sh
+COPY entrypoint-keepalived.sh /entrypoint.sh
+
+RUN chmod +x /usr/local/bin/check_haproxy.sh /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]
