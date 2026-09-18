@@ -1,0 +1,14 @@
+# Los dashboards se cargan desde archivos JSON versionados en git.
+# Asi quedan como evidencia reproducible y no se pierden si se borra el volumen.
+apiVersion: 1
+providers:
+  - name: 'BD2 Grupo 5'
+    orgId: 1
+    folder: 'BD2 Proyecto 1'
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 10
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

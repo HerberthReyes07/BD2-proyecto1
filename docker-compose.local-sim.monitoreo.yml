@@ -1,0 +1,77 @@
+# Override de SIMULACION LOCAL para la capa de monitoreo (Nodo 4).
+# Levanta el mismo stack que en distribuido, pero apuntando a los contenedores
+# simulados en vez de a las IPs de Tailscale. Sirve para validar que Prometheus
+# raspa, que los dashboards pintan y que k6 escribe, sin depender del equipo.
+#
+#   docker compose -f docker-compose.local-sim.yml \
+#                  -f docker-compose.local-sim.proxy.yml \
+#                  -f docker-compose.local-sim.monitoreo.yml up -d --build
+#
+# Grafana:    http://localhost:3000   (admin / admin)
+# Prometheus: http://localhost:9090
+
+services:
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    user: root
+    entrypoint: ["/bin/sh", "/etc/prometheus/entrypoint.sh"]
+    ports:
+      - "9090:9090"
+    environment:
+      - PATRONI_NODO1=patroni-nodo1:8008
+      - PATRONI_NODO2=patroni-nodo2:8008
+      - PATRONI_NODO3=patroni-nodo3:8008
+      # En la simulacion los 3 "nodos" comparten una sola maquina, asi que hay
+      # un unico node-exporter y las 3 series de CPU/memoria salen identicas.
+      # En distribuido cada nodo tiene el suyo y las curvas ya son distintas.
+      - NODEEXP_NODO1=node-exporter:9100
+      - NODEEXP_NODO2=node-exporter:9100
+      - NODEEXP_NODO3=node-exporter:9100
+      - PGEXP_NODO1=pgexp-nodo1:9187
+      - PGEXP_NODO2=pgexp-nodo2:9187
+      - PGEXP_NODO3=pgexp-nodo3:9187
+    volumes:
+      - ./monitoreo/prometheus/entrypoint.sh:/etc/prometheus/entrypoint.sh:ro
+
+  grafana:
+    image: grafana/grafana:11.5.2
+    depends_on: [prometheus]
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_DASHBOARDS_MIN_REFRESH_INTERVAL=5s
+      - PROMETHEUS_URL=http://prometheus:9090
+    volumes:
+      - ./monitoreo/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoreo/grafana/dashboards:/var/lib/grafana/dashboards:ro
+
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--web.listen-address=0.0.0.0:9100'
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+
+  pgexp-nodo1:
+    image: prometheuscommunity/postgres-exporter:v0.16.0
+    depends_on: [patroni-nodo1]
+    environment:
+      - DATA_SOURCE_NAME=postgresql://postgres:postgres123@patroni-nodo1:5432/postgres?sslmode=disable
+
+  pgexp-nodo2:
+    image: prometheuscommunity/postgres-exporter:v0.16.0
+    depends_on: [patroni-nodo2]
+    environment:
+      - DATA_SOURCE_NAME=postgresql://postgres:postgres123@patroni-nodo2:5432/postgres?sslmode=disable
+
+  pgexp-nodo3:
+    image: prometheuscommunity/postgres-exporter:v0.16.0
+    depends_on: [patroni-nodo3]
+    environment:
+      - DATA_SOURCE_NAME=postgresql://postgres:postgres123@patroni-nodo3:5432/postgres?sslmode=disable
