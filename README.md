@@ -426,26 +426,7 @@ El auxiliar puede seleccionar cualquier nodo o componente para simular una falla
 
 ---
 
-## 14. Plantilla de bitácora de pruebas
-
-> Llenar solo con resultados **realmente medidos**.
-
-| Fecha y hora | Fase | Nodo / componente | Acción realizada | Resultado esperado | Resultado obtenido | RTO | Evidencia |
-|---|---|---|---|---|---|---|---|
-| | Fase 1 | Los 3 | `--profile nodo-bd up -d --build` | 4+ contenedores arriba; `etcdcluster 3.5.x` | | N/A | |
-| | Fase 1 | Los 3 | `patronictl list` | Leader + Sync Standby + Replica | | N/A | |
-| | Fase 2 | Proxy | INSERT por 5000, SELECT por 5001 | Réplicas con el mismo conteo | | N/A | |
-| | Fase 3 | nodo1 | `docker compose stop patroni` | Failover a nodo2 | | | |
-| | Fase 3 | nodo1 | `docker compose start patroni` | Reintegración vía `pg_rewind` | | | |
-| | Fase 4 | nodo2 | `docker compose stop patroni` | nodo1 atiende escrituras | | | |
-| | Fase 5A | nodo1+2 | `stop patroni` (etcd vivo) | 5000 caído, 5001 responde | | N/A | |
-| | Fase 5B | nodo1+2 | `stop` completo (sin quórum) | 5001 sigue respondiendo | | N/A | |
-| | Fase 6 | nodo3 | Carga mixta + caída al 50% | Operaciones continúan tras el failover | | | |
-| | Fase 8 | — | Comparación pre/post caída | RPO = 0 (síncrono) | | N/A | |
-
----
-
-## 15. Troubleshooting general
+## 14. Troubleshooting general
 
 | Problema | Causa | Solución |
 |---|---|---|
@@ -461,7 +442,7 @@ Troubleshooting específico de cada capa (con más detalle) en su propio `README
 
 ---
 
-## 16. Ventajas y limitaciones
+## 15. Ventajas y limitaciones
 
 **Ventajas:**
 
@@ -482,7 +463,7 @@ Troubleshooting específico de cada capa (con más detalle) en su propio `README
 
 ---
 
-## 17. Extras implementados sobre el mínimo exigido
+## 16. Extras implementados sobre el mínimo exigido
 
 | Mínimo exigido por el enunciado | Extensión implementada en este proyecto |
 |---|---|
