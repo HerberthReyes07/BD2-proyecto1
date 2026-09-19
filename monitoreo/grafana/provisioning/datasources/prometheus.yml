@@ -1,0 +1,13 @@
+# Datasource aprovisionado. La URL viene por entorno para que el mismo archivo
+# sirva en red host (127.0.0.1) y en la simulacion local (nombre de contenedor).
+apiVersion: 1
+datasources:
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: ${PROMETHEUS_URL}
+    isDefault: true
+    editable: false
+    jsonData:
+      timeInterval: 5s

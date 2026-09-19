@@ -100,12 +100,95 @@ services:
       - KEEPALIVED_INTERFACE=${KEEPALIVED_INTERFACE:-tailscale0}
       - VIRTUAL_IP=${VIRTUAL_IP:-100.124.30.200}
 
-  # --- Se activa con --profile monitoreo, cuando C tenga su parte lista ---
-  # prometheus:
-  #   build: { context: ./monitoreo, dockerfile: Dockerfile }
-  #   profiles: ["monitoreo"]
-  #   ...
+  # ============================================================
+  # CAPA C — Observabilidad y carga (la lleva nodo3, que hace de "nodo 4")
+  # ============================================================
+
+  # --- Agentes de metricas: van en LOS TRES nodos de BD ---
+  # Comparten el perfil "nodo-bd" para que suban junto con el cluster y no haya
+  # que correr un segundo compose. Tienen ademas perfil propio por si hace falta
+  # reiniciarlos solos sin tocar la base de datos.
+  #
+  # Patroni ya expone sus propias metricas en :8008/metrics de forma nativa
+  # (rol, estado, timeline y posiciones de WAL), por eso aqui solo hacen falta
+  # las del sistema operativo y las de Postgres.
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    profiles: ["nodo-bd", "monitoreo-agente"]
+    restart: unless-stopped
+    network_mode: host
+    pid: host
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/host/root'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+      - '--web.listen-address=0.0.0.0:9100'
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/host/root:ro,rslave
+
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.16.0
+    profiles: ["nodo-bd", "monitoreo-agente"]
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      # Apunta al Postgres LOCAL de este nodo, no al proxy: cada nodo debe
+      # reportar su propio estado. Si Patroni tiene su Postgres abajo, publica
+      # pg_up=0, que es justo la senal de "servicio de BD caido" de la Fase 7.
+      - DATA_SOURCE_NAME=postgresql://postgres:${SUPERUSER_PASSWORD}@127.0.0.1:5432/postgres?sslmode=disable
+      - PG_EXPORTER_WEB_LISTEN_ADDRESS=0.0.0.0:9187
+
+  # --- Stack de observabilidad: SOLO lo levanta nodo3, con --profile monitoreo ---
+  # Es un unico punto de recoleccion para los tres nodos. Vive en nodo3 porque
+  # es el unico que sobrevive a todos los escenarios de falla de las Fases 3-5:
+  # si estuviera en nodo1 se apagaria justo cuando hay que observar.
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    profiles: ["monitoreo"]
+    restart: unless-stopped
+    network_mode: host
+    user: root
+    # El entrypoint genera prometheus.yml desde estas variables, para que la
+    # misma configuracion sirva aqui y en la simulacion local.
+    entrypoint: ["/bin/sh", "/etc/prometheus/entrypoint.sh"]
+    environment:
+      - PATRONI_NODO1=${IP_NODO1}:8008
+      - PATRONI_NODO2=${IP_NODO2}:8008
+      - PATRONI_NODO3=${IP_NODO3}:8008
+      - NODEEXP_NODO1=${IP_NODO1}:9100
+      - NODEEXP_NODO2=${IP_NODO2}:9100
+      - NODEEXP_NODO3=${IP_NODO3}:9100
+      - PGEXP_NODO1=${IP_NODO1}:9187
+      - PGEXP_NODO2=${IP_NODO2}:9187
+      - PGEXP_NODO3=${IP_NODO3}:9187
+    volumes:
+      - ./monitoreo/prometheus/entrypoint.sh:/etc/prometheus/entrypoint.sh:ro
+      - prometheus_data:/prometheus
+
+  grafana:
+    image: grafana/grafana:11.5.2
+    profiles: ["monitoreo"]
+    restart: unless-stopped
+    network_mode: host
+    depends_on: [prometheus]
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_DASHBOARDS_MIN_REFRESH_INTERVAL=5s
+      - PROMETHEUS_URL=http://127.0.0.1:9090
+    volumes:
+      # Dashboards aprovisionados desde archivos versionados en git: si se borra
+      # el contenedor no se pierde nada y quedan como evidencia reproducible.
+      - ./monitoreo/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoreo/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
 
 volumes:
   etcd_data:
   pgdata:
+  prometheus_data:
+  grafana_data:

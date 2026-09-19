@@ -1,1 +1,11 @@
 .env
+enunciado.pdf
+GUIA_EXPLICATIVA_CAPA_C.md
+PRUEBAS_LOCALES.md
+
+
+# Resultados de las corridas de carga (pgbench/k6). Son salidas locales con
+# marca de tiempo que se regeneran en cada prueba: no tiene sentido versionarlas.
+# Se conserva la carpeta para que la estructura exista al clonar el repo.
+carga/resultados/*
+!carga/resultados/.gitkeep
