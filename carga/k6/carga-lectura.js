@@ -9,6 +9,11 @@ import { sleep } from 'k6';
 const HOST     = __ENV.PROXY_HOST  || 'localhost';
 const P_READ   = __ENV.PUERTO_READ || '5001';
 const PASS     = __ENV.PGPASS      || 'postgres';
+if (!__ENV.PGPASS) {
+  console.warn('AVISO: PGPASS viene vacia; usando "postgres" por defecto. '
+             + 'Si el cluster tiene otra contrasena, TODAS las operaciones van a fallar. '
+             + 'Corre primero:  set -a && source .env && set +a');
+}
 const DURACION = __ENV.DURACION    || '1m';
 
 const dbLectura = sql.open(
@@ -32,6 +37,21 @@ export const options = {
   thresholds: {},
 };
 
+
+// Los errores se cuentan como metrica, pero los primeros tambien se imprimen:
+// un fallo silencioso (contrasena vacia, tabla inexistente) se ve en el dashboard
+// como "todo falla y no hay latencia", sin ninguna pista de la causa.
+let erroresLogueados = 0;
+function reportarError(tipo, e) {
+  if (erroresLogueados < 5) {
+    erroresLogueados++;
+    console.error(`[${tipo}] ${e}`);
+    if (erroresLogueados === 5) {
+      console.error('(se omiten los siguientes errores; revisa PGPASS, PROXY_HOST y que exista el dataset)');
+    }
+  }
+}
+
 export function leer() {
   const inicio = Date.now();
   try {
@@ -43,6 +63,7 @@ export function leer() {
     operacionesOk.add(1, { tipo: 'lectura' });
   } catch (e) {
     operacionesError.add(1, { tipo: 'lectura' });
+    reportarError('lectura', e);
   }
   sleep(0.1);
 }

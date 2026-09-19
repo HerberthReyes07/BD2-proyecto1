@@ -2,7 +2,7 @@
 enunciado.pdf
 GUIA_EXPLICATIVA_CAPA_C.md
 PRUEBAS_LOCALES.md
-PRUEBAS_EQUIPO.md
+
 
 # Resultados de las corridas de carga (pgbench/k6). Son salidas locales con
 # marca de tiempo que se regeneran en cada prueba: no tiene sentido versionarlas.
